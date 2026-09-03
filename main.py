@@ -5,10 +5,10 @@ from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 
 app = FastAPI()
-QUEUE_FILE = "/tmp/whatsapp_queue.json"
-WHATSAPP_TOKEN="EAAOzna8UP9sBSayVzrLAE3N1a58eA6cZBZAbdkwZCszFbfNZCUq6I12ZB3Tj1TRBHgkIpOWoHUZAHxkoE46FKS1nrLaAjBNIbtcXbSik7ZAiT5BeZAVtHU6v1I1ZCY7d9AyrIfih0DfgvQegv6ekpx40L4N2dgnQ7ZA1slFKDiD3BriiYqVOZCIEhlwZBF3RuymqA6oN9kZBaOJeHpd0OdX8pEQuBo2dS7JZBrdFSmVuIRMOnV6iWX1MBy"
+QUEUE_FILE = "/app/data/whatsapp_queue.json"
+WHATSAPP_TOKEN="***"
 PHONE_NUMBER_ID = "1203156892891204"
-VERIFY_TOKEN="luka_verify_2026"
+VERIFY_TOKEN="***"
 EGYPT_TZ = timezone(timedelta(hours=3))
 
 os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
@@ -44,18 +44,15 @@ async def send_wa(to, text, pid, reply_to=None):
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
-    """Meta webhook verification"""
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-
     if mode == "subscribe" and token == VERIFY_TOKEN:
         return Response(content=challenge, status_code=200)
     return Response(content="Forbidden", status_code=403)
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    """Handles messages AND status updates"""
     data = await request.json()
     queue = load_queue()
 
@@ -72,7 +69,7 @@ async def webhook(request: Request):
         save_queue(queue)
         return {"status": "updated"}
 
-    # Handle new message
+    # Handle new message from Worker
     message = data.get("message")
     if not message:
         return {"status": "no message"}
@@ -82,12 +79,10 @@ async def webhook(request: Request):
     text = message.get("text")
     phone_number_id = message.get("phone_number_id", PHONE_NUMBER_ID)
 
-    # Check if message already exists
     existing = next((m for m in queue if m.get("message_id") == msg_id), None)
     if existing:
         return {"status": "already_queued"}
 
-    # Check if this is a NEW customer
     is_new_customer = not any(m.get("sender") == sender for m in queue)
 
     queue.append({
@@ -97,7 +92,7 @@ async def webhook(request: Request):
         "text": text,
         "phone_number_id": phone_number_id,
         "message_type": message.get("message_type", "text"),
-        "status": "sent",  # Initial status
+        "status": "sent",
         "processed": False,
         "reply": "",
         "whatsapp_message_id": msg_id,
@@ -126,14 +121,12 @@ async def webhook(request: Request):
                     msg["sent_at"] = datetime.now(EGYPT_TZ).isoformat()
                     save_queue(current_queue)
                     break
-
         asyncio.create_task(fallback())
 
     return {"status": "queued"}
 
 @app.get("/pull")
 async def pull():
-    """Hermes calls this to get next pending message"""
     queue = load_queue()
     for msg in queue:
         if msg.get("status") == "pending":
@@ -144,35 +137,22 @@ async def pull():
 
 @app.post("/reply")
 async def reply(request: Request):
-    """Hermes sends reply here, FastAPI delivers to WhatsApp"""
     data = await request.json()
     msg_id = data.get("id")
     reply_text = data.get("reply", "").strip()
-
     if not msg_id or not reply_text:
         raise HTTPException(status_code=400, detail="id and reply required")
-
     queue = load_queue()
     msg = next((m for m in queue if m.get("id") == msg_id), None)
-
     if not msg:
         raise HTTPException(status_code=404, detail="message not found")
-
-    # Send reply to WhatsApp
-    await send_wa(
-        msg["sender"],
-        reply_text,
-        msg.get("phone_number_id", PHONE_NUMBER_ID),
-        reply_to=msg.get("message_id")
-    )
-
+    await send_wa(msg["sender"], reply_text, msg.get("phone_number_id", PHONE_NUMBER_ID), reply_to=msg.get("message_id"))
     msg["reply"] = reply_text
     msg["processed"] = True
     msg["sent_to_whatsapp"] = True
     msg["status"] = "completed"
     msg["processed_at"] = datetime.now(EGYPT_TZ).isoformat()
     msg["sent_at"] = datetime.now(EGYPT_TZ).isoformat()
-
     save_queue(queue)
     return {"ok": True}
 
@@ -182,7 +162,6 @@ async def health():
 
 @app.get("/stats")
 async def stats():
-    """Get queue statistics with status breakdown"""
     queue = load_queue()
     total = len(queue)
     pending = sum(1 for m in queue if m.get("status") == "pending")
@@ -192,14 +171,4 @@ async def stats():
     delivered = sum(1 for m in queue if m.get("status") == "delivered")
     read = sum(1 for m in queue if m.get("status") == "read")
     failed = sum(1 for m in queue if m.get("status") == "failed")
-
-    return {
-        "total": total,
-        "pending": pending,
-        "processing": processing,
-        "completed": completed,
-        "sent": sent,
-        "delivered": delivered,
-        "read": read,
-        "failed": failed
-    }
+    return {"total": total, "pending": pending, "processing": processing, "completed": completed, "sent": sent, "delivered": delivered, "read": read, "failed": failed}
