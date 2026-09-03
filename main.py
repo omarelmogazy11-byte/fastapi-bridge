@@ -3,22 +3,27 @@ from fastapi.responses import Response
 import httpx, json, os, asyncio
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
+
 app = FastAPI()
 QUEUE_FILE = "/app/data/whatsapp_queue.json"
 WHATSAPP_TOKEN="EAAOzna8UP9sBSayVzrLAE3N1a58eA6cZBZAbdkwZCszFbfNZCUq6I12ZB3Tj1TRBHgkIpOWoHUZAHxkoE46FKS1nrLaAjBNIbtcXbSik7ZAiT5BeZAVtHU6v1I1ZCY7d9AyrIfih0DfgvQegv6ekpx40L4N2dgnQ7ZA1slFKDiD3BriiYqVOZCIEhlwZBF3RuymqA6oN9kZBaOJeHpd0OdX8pEQuBo2dS7JZBrdFSmVuIRMOnV6iWX1MBy"
 PHONE_NUMBER_ID = "1203156892891204"
 VERIFY_TOKEN="luka_verify_2026"
 EGYPT_TZ = timezone(timedelta(hours=3))
+
 os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
 hermes_connections = []
+
 def load_queue():
     if os.path.exists(QUEUE_FILE):
         with open(QUEUE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return []
+
 def save_queue(queue):
     with open(QUEUE_FILE, "w", encoding="utf-8") as f:
         json.dump(queue, f, ensure_ascii=False, indent=2)
+
 async def send_wa(to, text, pid, reply_to=None):
     if not to or not text:
         return
@@ -37,6 +42,7 @@ async def send_wa(to, text, pid, reply_to=None):
         payload["context"] = {"message_id": reply_to}
     async with httpx.AsyncClient() as client:
         await client.post(url, json=payload, headers=headers)
+
 async def notify_hermes(message_data):
     disconnected = []
     for ws in hermes_connections:
@@ -46,6 +52,7 @@ async def notify_hermes(message_data):
             disconnected.append(ws)
     for ws in disconnected:
         hermes_connections.remove(ws)
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -74,6 +81,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
         hermes_connections.remove(websocket)
+
 @app.get("/webhook")
 async def verify_webhook(request: Request):
     mode = request.query_params.get("hub.mode")
@@ -82,6 +90,7 @@ async def verify_webhook(request: Request):
     if mode == "subscribe" and token == VERIFY_TOKEN:
         return Response(content=challenge, status_code=200)
     return Response(content="Forbidden", status_code=403)
+
 @app.post("/webhook")
 async def webhook(request: Request):
     data = await request.json()
@@ -149,9 +158,11 @@ async def webhook(request: Request):
                     break
         asyncio.create_task(fallback())
     return {"status": "queued"}
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "hermes_connected": len(hermes_connections)}
+
 @app.get("/stats")
 async def stats():
     queue = load_queue()
