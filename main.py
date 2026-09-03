@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 app = FastAPI()
 QUEUE_FILE = "/tmp/whatsapp_queue.json"
-WHATSAPP_TOKEN="EAAOzna8UP9sBSf3URe5F00IaDZCU9ZBiK32yCsH1ND1WoCAzUjx7XVYE3eZAMMbIOVt8nM6HioPCJOGoGWJo66SCIFiLNkBeYocMDKcRaUihvh3wOSDecGZBWEhbQOsDqKzmmrmX3grbZA8euzZBR81vYWxJ4Bh30x9MwxuToU6DPZAPFDslLVjDrZBmrjlE4Dl3LBHV9ZAc0VzeZBeQ4EWMkR1Bsf65XsPjqT7kZBZBSUjAQl9VW9FrDAZDZD"
+WHATSAPP_TOKEN="EAAOzna8UP9sBSayVzrLAE3N1a58eA6cZBZAbdkwZCszFbfNZCUq6I12ZB3Tj1TRBHgkIpOWoHUZAHxkoE46FKS1nrLaAjBNIbtcXbSik7ZAiT5BeZAVtHU6v1I1ZCY7d9AyrIfih0DfgvQegv6ekpx40L4N2dgnQ7ZA1slFKDiD3BriiYqVOZCIEhlwZBF3RuymqA6oN9kZBaOJeHpd0OdX8pEQuBo2dS7JZBrdFSmVuIRMOnV6iWX1MBy"
 PHONE_NUMBER_ID = "1203156892891204"
 VERIFY_TOKEN="luka_verify_2026"
 EGYPT_TZ = timezone(timedelta(hours=3))
@@ -44,7 +44,7 @@ async def send_wa(to, text, pid, reply_to=None):
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
-    """Meta webhook verification - GET endpoint"""
+    """Meta webhook verification"""
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
@@ -55,11 +55,24 @@ async def verify_webhook(request: Request):
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    """Receives messages from Cloudflare Worker"""
+    """Handles messages AND status updates"""
     data = await request.json()
     queue = load_queue()
 
-    # Handle new message from Worker
+    # Handle status updates from Meta
+    if "statuses" in data:
+        for status in data.get("statuses", []):
+            msg_id = status.get("id")
+            msg_status = status.get("status")
+            for msg in queue:
+                if msg.get("message_id") == msg_id:
+                    msg["status"] = msg_status
+                    msg["status_updated_at"] = datetime.now(EGYPT_TZ).isoformat()
+                    break
+        save_queue(queue)
+        return {"status": "updated"}
+
+    # Handle new message
     message = data.get("message")
     if not message:
         return {"status": "no message"}
@@ -74,7 +87,7 @@ async def webhook(request: Request):
     if existing:
         return {"status": "already_queued"}
 
-    # Check if this is a NEW customer (first time sender)
+    # Check if this is a NEW customer
     is_new_customer = not any(m.get("sender") == sender for m in queue)
 
     queue.append({
@@ -84,7 +97,7 @@ async def webhook(request: Request):
         "text": text,
         "phone_number_id": phone_number_id,
         "message_type": message.get("message_type", "text"),
-        "status": "pending",
+        "status": "sent",  # Initial status
         "processed": False,
         "reply": "",
         "whatsapp_message_id": msg_id,
@@ -169,15 +182,24 @@ async def health():
 
 @app.get("/stats")
 async def stats():
-    """Get queue statistics"""
+    """Get queue statistics with status breakdown"""
     queue = load_queue()
     total = len(queue)
     pending = sum(1 for m in queue if m.get("status") == "pending")
     processing = sum(1 for m in queue if m.get("status") == "processing")
     completed = sum(1 for m in queue if m.get("status") == "completed")
+    sent = sum(1 for m in queue if m.get("status") == "sent")
+    delivered = sum(1 for m in queue if m.get("status") == "delivered")
+    read = sum(1 for m in queue if m.get("status") == "read")
+    failed = sum(1 for m in queue if m.get("status") == "failed")
+
     return {
         "total": total,
         "pending": pending,
         "processing": processing,
-        "completed": completed
+        "completed": completed,
+        "sent": sent,
+        "delivered": delivered,
+        "read": read,
+        "failed": failed
     }
