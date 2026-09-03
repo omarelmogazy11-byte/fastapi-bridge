@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import Response
 import httpx, json, os, asyncio
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 
 app = FastAPI()
 QUEUE_FILE = "/tmp/whatsapp_queue.json"
-WHATSAPP_TOKEN="***"
+WHATSAPP_TOKEN="EAAOzn...ZDZD"
 PHONE_NUMBER_ID = "1203156892891204"
 VERIFY_TOKEN="***"
 EGYPT_TZ = timezone(timedelta(hours=3))
@@ -49,9 +50,7 @@ async def verify_webhook(request: Request):
     challenge = request.query_params.get("hub.challenge")
 
     if mode == "subscribe" and token == VERIFY_TOKEN:
-        from fastapi.responses import Response
         return Response(content=challenge, status_code=200)
-    from fastapi.responses import Response
     return Response(content="Forbidden", status_code=403)
 
 @app.post("/webhook")
