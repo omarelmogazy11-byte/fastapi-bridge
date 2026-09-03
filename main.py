@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 
 app = FastAPI()
 QUEUE_FILE = "/app/data/whatsapp_queue.json"
-WHATSAPP_TOKEN="***"
+WHATSAPP_TOKEN="EAAOzna8UP9sBSayVzrLAE3N1a58eA6cZBZAbdkwZCszFbfNZCUq6I12ZB3Tj1TRBHgkIpOWoHUZAHxkoE46FKS1nrLaAjBNIbtcXbSik7ZAiT5BeZAVtHU6v1I1ZCY7d9AyrIfih0DfgvQegv6ekpx40L4N2dgnQ7ZA1slFKDiD3BriiYqVOZCIEhlwZBF3RuymqA6oN9kZBaOJeHpd0OdX8pEQuBo2dS7JZBrdFSmVuIRMOnV6iWX1MBy"
 PHONE_NUMBER_ID = "1203156892891204"
-VERIFY_TOKEN="***"
+VERIFY_TOKEN="luka_verify_2026"
 EGYPT_TZ = timezone(timedelta(hours=3))
 
 os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
@@ -57,27 +57,33 @@ async def webhook(request: Request):
     queue = load_queue()
 
     # Handle status updates from Meta
-    if "statuses" in data:
-        for status in data.get("statuses", []):
-            msg_id = status.get("id")
-            msg_status = status.get("status")
-            for msg in queue:
-                if msg.get("message_id") == msg_id:
-                    msg["status"] = msg_status
-                    msg["status_updated_at"] = datetime.now(EGYPT_TZ).isoformat()
-                    break
-        save_queue(queue)
-        return {"status": "updated"}
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+        if "statuses" in value:
+            for status in value["statuses"]:
+                msg_id = status.get("id")
+                msg_status = status.get("status")
+                for msg in queue:
+                    if msg.get("message_id") == msg_id:
+                        msg["status"] = msg_status
+                        msg["status_updated_at"] = datetime.now(EGYPT_TZ).isoformat()
+                        break
+            save_queue(queue)
+            return {"status": "updated"}
+    except (KeyError, IndexError):
+        pass
 
-    # Handle new message from Worker
-    message = data.get("message")
-    if not message:
+    # Handle new message from Meta
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+        message = value["messages"][0]
+    except (KeyError, IndexError):
         return {"status": "no message"}
 
-    msg_id = message.get("message_id")
-    sender = message.get("sender")
-    text = message.get("text")
-    phone_number_id = message.get("phone_number_id", PHONE_NUMBER_ID)
+    msg_id = message.get("id")
+    sender = message.get("from")
+    text = message.get("text", {}).get("body", "")
+    phone_number_id = value.get("metadata", {}).get("phone_number_id", PHONE_NUMBER_ID)
 
     existing = next((m for m in queue if m.get("message_id") == msg_id), None)
     if existing:
@@ -91,7 +97,7 @@ async def webhook(request: Request):
         "sender": sender,
         "text": text,
         "phone_number_id": phone_number_id,
-        "message_type": message.get("message_type", "text"),
+        "message_type": "text",
         "status": "sent",
         "processed": False,
         "reply": "",
