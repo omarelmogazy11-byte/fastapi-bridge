@@ -8,7 +8,7 @@ app = FastAPI()
 QUEUE_FILE = "/tmp/whatsapp_queue.json"
 WHATSAPP_TOKEN="EAAOzn...ZDZD"
 PHONE_NUMBER_ID = "1203156892891204"
-VERIFY_TOKEN="***"
+VERIFY_TOKEN="luka_verify_2026"
 EGYPT_TZ = timezone(timedelta(hours=3))
 
 os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
